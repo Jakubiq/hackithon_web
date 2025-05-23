@@ -1,4 +1,5 @@
 from flask import Flask
+import geopandas
 
 app = Flask(__name__)
 
