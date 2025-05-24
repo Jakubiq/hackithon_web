@@ -5,7 +5,7 @@ from streamlit_folium import folium_static
 import pandas as pd
 import os
 
-st.title("Interaktivní mapa signálu na dálnici")
+st.title("Pokrytí dálnic mobilním signálém")
 
 dalnice_framy = []
 seznam_dalnic = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 35, 46, 52, 55]
@@ -17,16 +17,20 @@ dalnice_celek = pd.concat(dalnice_framy)
 # zkontroluj, kolik veci je v overlays a podle toho to nacti do pole
 # napad je takovy, ze se podle overlayu (obce, kraje, regiony) bude nejakym zpusobem delat statistika toho, jak je v danem ohranicenem useku kvalita signalu na dalnicich
 
-map_data_file = gpd.read_file("./overlays/OKRESY_P.shp.geojson")
 
 overlays_files = os.listdir("./overlays") # Budeme doufat, ze kazdy druh overlaye zacina tim jmenem, kterym jakoby je ve skutecnosti
 
 total_overlays = []
+overlays_names = []
 for file in overlays_files:
     total_overlays.append(gpd.read_file(f"./overlays/{file}"))
-    overlays_names = file.split("_")[0] 
+    overlays_names.append(file.split("_")[0]) 
+map_data_file = gpd.read_file("./overlays/VUSC_P.shp.geojson")
 
-st.write(overlays_names)
+
+# st.write(overlays_names) DEBUG
+# co ted - mam vic overlays, musim to nejak zakomponvoat nize, asi pomoci indexu i guess?
+
 
 operatori = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
@@ -150,26 +154,27 @@ if dalnice_celek is not None:
             ).add_to(m)
 
         # Přidání overlaye přes mapu (regiony, kraje, okresy, obce...)
-        folium.GeoJson(
-            map_data_file,
-            name="test",
-            style_function=lambda feature: {
-                'fillColor': 'lightblue',
-                'color': 'black',
-                'weight': 1,
-                'fillOpacity': 0.5,
-            },
-            highlight_function=lambda feature: {
-                'weight': 4,
-                'color': 'red',
-                'fillOpacity': 0.7
-            },
-            popup=folium.GeoJsonPopup(
-                fields=[map_data_file.columns[0]],
-                aliases=["test:"],
-                localize=True
-            )
-        ).add_to(m)
+        for i in range(0, len(overlays_names)):
+            folium.GeoJson(
+                total_overlays[i],
+                name=overlays_names[i],
+                style_function=lambda feature: {
+                    'fillColor': 'lightblue',
+                    'color': 'black',
+                    'weight': 1,
+                    'fillOpacity': 0.5,
+                },
+                highlight_function=lambda feature: {
+                    'weight': 4,
+                    'color': 'red',
+                    'fillOpacity': 0.7
+                },
+                popup=folium.GeoJsonPopup(
+                    fields=[map_data_file.columns[1]],
+                    aliases=[""],
+                    localize=True
+                )
+            ).add_to(m)
 
         folium.LayerControl().add_to(m)
 

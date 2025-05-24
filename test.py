@@ -4,7 +4,7 @@ overlays_files = os.listdir("./overlays") # Budeme doufat, ze kazdy druh overlay
 
 total_overlays = []
 for file in overlays_files:
-    total_overlays.append(gpd.read_file(f"./overlays/{file}"))
-    overlays_names = i.split("_")[0] 
+    overlays_names = file.split("_")[0] 
+    total_overlays.append(file.split("_")[0])
 
-print(overlays_names)
+print(total_overlays)
