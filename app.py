@@ -17,7 +17,7 @@ dalnice_celek = pd.concat(dalnice_framy)
 
 # Chci aby to vzalo vsechny soubory v dalnice a z nich to vyzobrazilo tu mapu - cyklus? 
 
-operator_map = {
+operatori = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
     "O2 LTE": "O2 LTE - RSRP",
     "Vodafone LTE": "Vodafone LTE - RSRP"
@@ -49,9 +49,9 @@ if dalnice_celek is not None:
 
     operator = st.radio(
         "Vyberte operátora",
-        list(operator_map.keys())
+        list(operatori.keys())
     )
-    operator_col = operator_map[operator]
+    operator_col = operatori[operator]
 
     quality = st.selectbox(
         "Vyberte kvalitu signálu",
@@ -96,10 +96,19 @@ if dalnice_celek is not None:
         st.warning("Pro vybraného operátora a kvalitu signálu nejsou v datech žádné body.")
     else:
         fig = folium.Figure(width=1200, height=1200)
+
         m = folium.Map(
             location=[50.0716968, 14.444761],
             zoom_start=8,
         ).add_to(fig)
+
+        folium.plugins.Fullscreen(
+            position="topright",
+            title="Fullscreen",
+            title_cancel="Zmenšit",
+            forced_separate_button=True,
+        ).add_to(m)
+
         for _, row in redukovane_body.iterrows():
             signal = row[operator_col]
             time = row.get('time', 'N/A')
