@@ -8,9 +8,9 @@ st.title("Interaktivní mapa signálu na dálnici")
 
 dalnice_framy = []
 seznam_dalnic = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 35, 46, 52, 55]
-for i in range(0, len(seznam_dalnic)):
+for i in range(0, 57):
     if i in seznam_dalnic:
-        dalnice_framy.append(gpd.read_file(f"./dalnice/pokryti-dalnic-mobilnim-signalem-d{seznam_dalnic[i]}_converted.geojson"))
+        dalnice_framy.append(gpd.read_file(f"./dalnice/pokryti-dalnic-mobilnim-signalem-d{i}_converted.geojson"))
 map_data_file = st.file_uploader("Nahrajte GeoJSON soubor", type=["geojson", "json"])
 
 dalnice_celek = pd.concat(dalnice_framy)
@@ -46,8 +46,6 @@ def get_quality(value):
         return "špatný"
 
 if dalnice_celek is not None:
-    #gdf = gpd.read_file(uploaded_file)
-    #gdf = dalnice
 
     operator = st.radio(
         "Vyberte operátora",
@@ -60,11 +58,11 @@ if dalnice_celek is not None:
         quality_options
     )
 
-    # Přesnost zobrazení
     precision_options = [
-        "Maximální přesnost (všechny body 1:1)",
+        "Menší přesnost (každý 20. bod)",
         "Větší přesnost (každý 10. bod)",
-        "Menší přesnost (každý 20. bod)"
+        "Maximální přesnost (všechny body 1:1)",
+
     ]
     precision = st.radio(
         "Zvolte přesnost zobrazení",
@@ -78,30 +76,31 @@ if dalnice_celek is not None:
     else:
         reduction_factor = 1  # všechny body
 
-    filtered_gdf = dalnice_celek[~dalnice_celek[operator_col].isna()]
+    filtered_dalnice = dalnice_celek[~dalnice_celek[operator_col].isna()]
 
     if quality == "všechny":
-        filtered_gdf = filtered_gdf.copy()
-        filtered_gdf["signal_quality"] = filtered_gdf[operator_col].apply(get_quality)
-        st.write(f"Počet bodů s dostupným signálem {operator}: {len(filtered_gdf)}")
+        filtered_dalnice = filtered_dalnice.copy()
+        filtered_dalnice["signal_quality"] = filtered_dalnice[operator_col].apply(get_quality)
+        st.write(f"Počet bodů s dostupným signálem {operator}: {len(filtered_dalnice)}")
     else:
         min_val, max_val = signal_quality_ranges[quality]
-        filtered_gdf = filtered_gdf[(filtered_gdf[operator_col] >= min_val) & (filtered_gdf[operator_col] < max_val)]
-        st.write(f"Počet bodů s dostupným signálem {operator} a kvalitou '{quality}': {len(filtered_gdf)}")
+        filtered_dalnice = filtered_dalnice[(filtered_dalnice[operator_col] >= min_val) & (filtered_dalnice[operator_col] < max_val)]
+        st.write(f"Počet bodů s dostupným signálem {operator} a kvalitou '{quality}': {len(filtered_dalnice)}")
 
     # Redukce počtu bodů
-    reduced_gdf = filtered_gdf.iloc[::reduction_factor, :]
+    redukovane_body = filtered_dalnice.iloc[::reduction_factor, :]
 
-    st.write(f"Zobrazeno bodů po redukci: {len(reduced_gdf)}")
+    st.write(f"Zobrazeno bodů po redukci: {len(redukovane_body)}")
 
-    if reduced_gdf.empty:
+    if redukovane_body.empty:
         st.warning("Pro vybraného operátora a kvalitu signálu nejsou v datech žádné body.")
     else:
+        fig = folium.Figure(width=1200, height=1200)
         m = folium.Map(
-            location=[reduced_gdf.geometry.y.mean(), reduced_gdf.geometry.x.mean()],
-            zoom_start=10
-        )
-        for _, row in reduced_gdf.iterrows():
+            location=[50.0716968, 14.444761],
+            zoom_start=8,
+        ).add_to(fig)
+        for _, row in redukovane_body.iterrows():
             signal = row[operator_col]
             time = row.get('time', 'N/A')
             if quality == "všechny":
