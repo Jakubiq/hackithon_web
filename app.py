@@ -6,11 +6,9 @@ import pandas as pd
 
 st.title("Interaktivní mapa signálu na dálnici")
 
-uploaded_file = st.file_uploader(
-    "Nahrajte GeoJSON soubor s body", 
-    type=["geojson", "json"],
-    help="Soubor by měl být ve formátu GeoJSON s body a hodnotami síly signálu."
-)
+dalnice = gpd.read_file("./dalnice/pokryti-dalnic-mobilnim-signalem-d8_converted.geojson") 
+map_data_file = st.file_uploader("Nahrajte GeoJSON soubor", type=["geojson", "json"])
+
 
 operator_map = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
@@ -40,8 +38,9 @@ def get_quality(value):
     else:
         return "špatný"
 
-if uploaded_file:
-    gdf = gpd.read_file(uploaded_file)
+if dalnice is not None:
+    #gdf = gpd.read_file(uploaded_file)
+    gdf = dalnice
 
     operator = st.radio(
         "Vyberte operátora",
