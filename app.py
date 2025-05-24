@@ -6,8 +6,14 @@ import pandas as pd
 
 st.title("Interaktivní mapa signálu na dálnici")
 
-dalnice = gpd.read_file("./dalnice/pokryti-dalnic-mobilnim-signalem-d10_converted.geojson") 
+dalnice_framy = []
+seznam_dalnic = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 35, 46, 52, 55]
+for i in range(0, len(seznam_dalnic)):
+    if i in seznam_dalnic:
+        dalnice_framy.append(gpd.read_file(f"./dalnice/pokryti-dalnic-mobilnim-signalem-d{seznam_dalnic[i]}_converted.geojson"))
 map_data_file = st.file_uploader("Nahrajte GeoJSON soubor", type=["geojson", "json"])
+
+dalnice_celek = pd.concat(dalnice_framy)
 
 # Chci aby to vzalo vsechny soubory v dalnice a z nich to vyzobrazilo tu mapu - cyklus? 
 
@@ -39,9 +45,9 @@ def get_quality(value):
     else:
         return "špatný"
 
-if dalnice is not None:
+if dalnice_celek is not None:
     #gdf = gpd.read_file(uploaded_file)
-    gdf = dalnice
+    #gdf = dalnice
 
     operator = st.radio(
         "Vyberte operátora",
@@ -72,7 +78,7 @@ if dalnice is not None:
     else:
         reduction_factor = 1  # všechny body
 
-    filtered_gdf = gdf[~gdf[operator_col].isna()]
+    filtered_gdf = dalnice_celek[~dalnice_celek[operator_col].isna()]
 
     if quality == "všechny":
         filtered_gdf = filtered_gdf.copy()
