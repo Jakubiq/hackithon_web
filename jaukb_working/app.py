@@ -6,6 +6,7 @@ import pandas as pd
 import os
 import plotly.express as px
 import hashlib # Pro hashování
+from shapely.geometry import Point, LineString # Přidáno pro práci s geometrií
 
 st.set_page_config(layout="wide") # Pro širší layout aplikace
 st.title("Pokrytí dálnic mobilním signálem")
@@ -43,7 +44,12 @@ def load_all_dalnice_data(seznam_dalnic_param): # Změnil jsem název parametru,
         else:
             st.warning(f"Soubor s daty pro D{i} nebyl nalezen: {file_path}")
     if all_dfs:
-        return pd.concat(all_dfs)
+        # Původní CRS (EPSG:4326) se předpokládá pro body dálnic
+        concatenated_gdf = pd.concat(all_dfs)
+        # Zajištění, že CRS je nastaveno na EPSG:4326, pokud není
+        if concatenated_gdf.crs is None:
+            concatenated_gdf.set_crs("EPSG:4326", inplace=True)
+        return concatenated_gdf
     return gpd.GeoDataFrame() # Vrať prázdný GeoDataFrame, pokud se nic nenačte
 
 dalnice_celek = load_all_dalnice_data(seznam_dalnic)
@@ -73,6 +79,9 @@ def load_all_overlays(overlays_files_param, kraje_nazev_sloupce_param):
 
             if "VUSC_P.shp.geojson" in file:
                 kraje_g = gdf
+                # Zajištění, že CRS je nastaveno na EPSG:4326, pokud není
+                if kraje_g.crs is None:
+                    kraje_g.set_crs("EPSG:4326", inplace=True)
                 st.sidebar.info(f"Identifikovaný sloupec pro název kraje: **{kraje_nazev_sloupce_param}** v souboru {file}")
         else:
             st.warning(f"Soubor s overlay daty nebyl nalezen: {file_path}")
@@ -119,26 +128,29 @@ def get_quality(value):
         return "špatný"
 
 # --- Funkce pro přípravu dat o krajích pro popupy ---
-# Nyní s custom hash_funcs pro GeoDataFrame
 @st.cache_data(hash_funcs={gpd.GeoDataFrame: hash_geodataframe})
 def prepare_kraje_data_for_popup(data_dalnice, data_kraje, nazev_sloupce_kraje):
     if data_kraje is None or data_kraje.empty or nazev_sloupce_kraje not in data_kraje.columns:
         st.warning(f"Data krajů nejsou k dispozici nebo chybí sloupec '{nazev_sloupce_kraje}'. Informace o krajích nebudou v popupech.")
-        return None # Vracíme None, pokud data nejsou platná
+        return None
 
-    # Převedeme CRS dálnic na CRS krajů
-    if not data_dalnice.empty:
-        # Zkontrolujeme, zda se CRS liší, než provedeme transformaci
-        if data_dalnice.crs != data_kraje.crs:
-            data_dalnice_proj = data_dalnice.to_crs(data_kraje.crs)
-        else:
-            data_dalnice_proj = data_dalnice
-    else:
+    # Převedeme CRS dálnic a krajů na EPSG:5514 (S-JTSK) pro přesný výpočet vzdáleností v metrech
+    # Ujistíme se, že vstupní GDF má definované CRS
+    if data_dalnice.crs is None:
+        data_dalnice.set_crs("EPSG:4326", inplace=True) # Předpokládáme, že původní je WGS84
+    if data_kraje.crs is None:
+        data_kraje.set_crs("EPSG:4326", inplace=True) # Předpokládáme, že původní je WGS84
+
+    data_dalnice_proj = data_dalnice.to_crs("EPSG:5514") # Transformace na S-JTSK
+    data_kraje_proj = data_kraje.to_crs("EPSG:5514")     # Transformace na S-JTSK
+
+    if data_dalnice_proj.empty:
         st.warning("Data dálnic jsou prázdná, nelze provést prostorové spojení s kraji.")
-        return data_kraje.copy() # Vrátíme kopii krajů bez dalších dat
+        return data_kraje.copy()
 
     # Spojení dálnic s kraji na základě prostorového umístění
-    dalnice_v_krajich = gpd.sjoin(data_dalnice_proj, data_kraje, how="inner", predicate="within")
+    # Používáme sjoin s 'within' pro body uvnitř polygonů krajů
+    dalnice_v_krajich = gpd.sjoin(data_dalnice_proj, data_kraje_proj, how="inner", predicate="within")
 
     if dalnice_v_krajich.empty:
         st.warning("Žádné body dálnic se nepřekrývají s kraji. Zkontrolujte CRS a geometrie.")
@@ -147,39 +159,84 @@ def prepare_kraje_data_for_popup(data_dalnice, data_kraje, nazev_sloupce_kraje):
     for op_name, op_col in operatori.items():
         dalnice_v_krajich[f"{op_name}_quality"] = dalnice_v_krajich[op_col].apply(get_quality)
 
-    # Vytvoříme kopii data_kraje, abychom neměnili cachovaný objekt přímo
     kraje_s_daty = data_kraje.copy()
+    kraje_s_daty['km_dobry_signal'] = 0.0 # Inicializace nového sloupce
 
-    # Vypočítáme podíl dobrého signálu pro každého operátora v každém kraji
+    # Vypočítáme podíl dobrého signálu a délku pokrytí pro každého operátora v každém kraji
     for kraj_idx, kraj_row in kraje_s_daty.iterrows():
         kraj_name = kraj_row[nazev_sloupce_kraje]
-        kraj_data = dalnice_v_krajich[dalnice_v_krajich[nazev_sloupce_kraje] == kraj_name]
-        
+        kraj_data = dalnice_v_krajich[dalnice_v_krajich[nazev_sloupce_kraje] == kraj_name].sort_values(by=['dalnice', 'time']) # Důležité pro řazení bodů na dálnici
+
         total_points_in_kraj = len(kraj_data)
         
         op_info_html = f"<b>Kraj: {kraj_name}</b><br><br>Statistiky signálu:<br>"
         best_op_name = "N/A"
         max_perc = -1.0
         
+        total_good_signal_length_km = 0.0 # Celková délka s dobrým signálem pro daný kraj
+        
         if total_points_in_kraj > 0:
             operator_percentages = []
-            for op_name in operatori.keys():
-                good_signal_points = len(kraj_data[kraj_data[f"{op_name}_quality"] == "dobrý"])
-                percentage_good = (good_signal_points / total_points_in_kraj) * 100
-                operator_percentages.append((op_name, percentage_good))
-                op_info_html += f"&nbsp;&nbsp;&nbsp;&nbsp;{op_name}: {percentage_good:.1f}% dobrého signálu<br>"
             
-            # Najdeme nejlepšího operátora pro tento kraj
-            if operator_percentages:
-                best_op_name, max_perc = max(operator_percentages, key=lambda item: item[1])
+            # --- Zde se budeme snažit spočítat celkové pokrytí "dobrým" signálem ---
+            # Vytvoříme sloupec, který bude True, pokud alespoň jeden operátor má "dobrý" signál
+            good_signal_any_operator_mask = pd.Series([False] * len(kraj_data), index=kraj_data.index)
+            for op_name in operatori.keys():
+                good_signal_any_operator_mask |= (kraj_data[f"{op_name}_quality"] == "dobrý")
+            
+            # Počet bodů, kde je alespoň jeden dobrý signál
+            total_points_with_any_good_signal = good_signal_any_operator_mask.sum()
+            
+            # Celkové procento pokrytí dobrým signálem
+            overall_good_signal_percentage = (total_points_with_any_good_signal / total_points_in_kraj) * 100 if total_points_in_kraj > 0 else 0
+
+            # Pro každý úsek dálnice v rámci kraje vypočítáme délku s dobrým signálem
+            for dalnice_id in kraj_data['dalnice'].unique():
+                dalnice_segment_data = kraj_data[kraj_data['dalnice'] == dalnice_id].copy()
+                
+                # Vypočítáme délku úseku dálnice s dobrým signálem od libovolného operátora
+                good_signal_segment_data = dalnice_segment_data[
+                    (dalnice_segment_data[f"T-Mobile LTE_quality"] == "dobrý") |
+                    (dalnice_segment_data[f"O2 LTE_quality"] == "dobrý") |
+                    (dalnice_segment_data[f"Vodafone LTE_quality"] == "dobrý")
+                ]
+
+                if not good_signal_segment_data.empty:
+                    if len(good_signal_segment_data) >= 2:
+                        coords = [p.coords[0] for p in good_signal_segment_data.geometry]
+                        line = LineString(coords)
+                        total_good_signal_length_km += line.length / 1000 # Délka v km
+                
+                # Původní výpočet procent dobrého signálu pro každý operátor
+                for op_name in operatori.keys():
+                    good_signal_points_op = len(dalnice_segment_data[dalnice_segment_data[f"{op_name}_quality"] == "dobrý"])
+                    percentage_good = (good_signal_points_op / len(dalnice_segment_data)) * 100 if len(dalnice_segment_data) > 0 else 0
+                    operator_percentages.append((op_name, percentage_good))
+            
+            # Agregace procent pro celý kraj
+            aggregated_percentages = {}
+            for op, perc in operator_percentages:
+                aggregated_percentages.setdefault(op, []).append(perc)
+            
+            final_operator_percentages = []
+            for op, percs in aggregated_percentages.items():
+                avg_perc = sum(percs) / len(percs) if len(percs) > 0 else 0 # Zajištění dělení nulou
+                final_operator_percentages.append((op, avg_perc))
+                op_info_html += f"&nbsp;&nbsp;&nbsp;&nbsp;{op}: {avg_perc:.1f}% dobrého signálu<br>"
+
+            # Najdeme nejlepšího operátora pro tento kraj z final_operator_percentages
+            if final_operator_percentages:
+                best_op_name, max_perc = max(final_operator_percentages, key=lambda item: item[1])
             
             op_info_html += f"<br><b>Nejlepší operátor na dálnici: {best_op_name} ({max_perc:.1f}% dobrého signálu)</b>"
+            op_info_html += f"<br><b>Celkové pokrytí dobrým signálem (alespoň 1 operátor): {overall_good_signal_percentage:.1f}%</b>"
+            op_info_html += f"<br><b>Celková délka dálnic s dobrým signálem (alespoň 1 operátor): {total_good_signal_length_km:.2f} km</b>"
 
         else:
             op_info_html += "Žádná data o signálu v tomto kraji."
 
-        # Přidáme HTML řetězec do nové vlastnosti GeoDataFrame
         kraje_s_daty.loc[kraj_idx, 'popup_html'] = op_info_html
+        kraje_s_daty.loc[kraj_idx, 'km_dobry_signal'] = total_good_signal_length_km # Toto je nyní celková délka, kde má dobrý signál alespoň jeden operátor
             
     return kraje_s_daty
 
@@ -187,9 +244,8 @@ def prepare_kraje_data_for_popup(data_dalnice, data_kraje, nazev_sloupce_kraje):
 
 if not dalnice_celek.empty:
 
-    # Předzpracujeme data o krajích s informacích o signálu
+    # Předzpracujeme data o krajích s informacemi o signálu
     prepared_kraje_gdf = prepare_kraje_data_for_popup(dalnice_celek, kraje_gdf, kraje_nazev_sloupce)
-
 
     operator = st.radio(
         "Vyberte operátora",
