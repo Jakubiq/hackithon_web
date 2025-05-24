@@ -11,11 +11,12 @@ seznam_dalnic = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 35, 46, 52, 55]
 for i in range(0, 57):
     if i in seznam_dalnic:
         dalnice_framy.append(gpd.read_file(f"./dalnice/pokryti-dalnic-mobilnim-signalem-d{i}_converted.geojson"))
-map_data_file = st.file_uploader("Nahrajte GeoJSON soubor", type=["geojson", "json"])
 
+# zkontroluj, kolik veci je v overlays a podle toho to nacti do pole
+# napad je takovy, ze se podle overlayu (obce, kraje, regiony) bude nejakym zpusobem delat statistika toho, jak je v danem ohranicenem useku kvalita signalu na dalnicich
+
+map_data_file = gpd.read_file("./overlays/OKRESY_P.shp.geojson")
 dalnice_celek = pd.concat(dalnice_framy)
-
-# Chci aby to vzalo vsechny soubory v dalnice a z nich to vyzobrazilo tu mapu - cyklus? 
 
 operatori = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
@@ -95,6 +96,7 @@ if dalnice_celek is not None:
     if redukovane_body.empty:
         st.warning("Pro vybraného operátora a kvalitu signálu nejsou v datech žádné body.")
     else:
+        # Základní nastavení mapy
         fig = folium.Figure(width=1200, height=1200)
 
         m = folium.Map(
@@ -136,4 +138,29 @@ if dalnice_celek is not None:
                 fill_opacity=0.7,
                 popup=f"{operator}: {signal} dBm<br>Čas: {time}"
             ).add_to(m)
+
+        # Přidání overlaye přes mapu (regiony, kraje, okresy, obce...)
+        folium.GeoJson(
+            map_data_file,
+            name="test",
+            style_function=lambda feature: {
+                'fillColor': 'lightblue',
+                'color': 'black',
+                'weight': 1,
+                'fillOpacity': 0.5,
+            },
+            highlight_function=lambda feature: {
+                'weight': 4,
+                'color': 'red',
+                'fillOpacity': 0.7
+            },
+            popup=folium.GeoJsonPopup(
+                fields=[map_data_file.columns[0]],
+                aliases=["test:"],
+                localize=True
+            )
+        ).add_to(m)
+
+        folium.LayerControl().add_to(m)
+
         folium_static(m)
