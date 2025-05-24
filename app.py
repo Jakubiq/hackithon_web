@@ -3,6 +3,7 @@ import geopandas as gpd
 import folium
 from streamlit_folium import folium_static
 import pandas as pd
+import os
 
 st.title("Interaktivní mapa signálu na dálnici")
 
@@ -11,12 +12,21 @@ seznam_dalnic = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 35, 46, 52, 55]
 for i in range(0, 57):
     if i in seznam_dalnic:
         dalnice_framy.append(gpd.read_file(f"./dalnice/pokryti-dalnic-mobilnim-signalem-d{i}_converted.geojson"))
+dalnice_celek = pd.concat(dalnice_framy)
 
 # zkontroluj, kolik veci je v overlays a podle toho to nacti do pole
 # napad je takovy, ze se podle overlayu (obce, kraje, regiony) bude nejakym zpusobem delat statistika toho, jak je v danem ohranicenem useku kvalita signalu na dalnicich
 
 map_data_file = gpd.read_file("./overlays/OKRESY_P.shp.geojson")
-dalnice_celek = pd.concat(dalnice_framy)
+
+overlays_files = os.listdir("./overlays") # Budeme doufat, ze kazdy druh overlaye zacina tim jmenem, kterym jakoby je ve skutecnosti
+
+total_overlays = []
+for file in overlays_files:
+    total_overlays.append(gpd.read_file(f"./overlays/{file}"))
+    overlays_names = file.split("_")[0] 
+
+st.write(overlays_names)
 
 operatori = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
