@@ -3,16 +3,36 @@ import geopandas as gpd
 import folium
 from streamlit_folium import folium_static
 import pandas as pd
+import os
 
-st.title("Interaktivní mapa signálu na dálnici")
+st.title("Pokrytí dálnic mobilním signálém")
 
-uploaded_file = st.file_uploader(
-    "Nahrajte GeoJSON soubor s body", 
-    type=["geojson", "json"],
-    help="Soubor by měl být ve formátu GeoJSON s body a hodnotami síly signálu."
-)
+dalnice_framy = []
+seznam_dalnic = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 35, 46, 52, 55]
+for i in range(0, 57):
+    if i in seznam_dalnic:
+        dalnice_framy.append(gpd.read_file(f"./dalnice/pokryti-dalnic-mobilnim-signalem-d{i}_converted.geojson"))
+dalnice_celek = pd.concat(dalnice_framy)
 
-operator_map = {
+# zkontroluj, kolik veci je v overlays a podle toho to nacti do pole
+# napad je takovy, ze se podle overlayu (obce, kraje, regiony) bude nejakym zpusobem delat statistika toho, jak je v danem ohranicenem useku kvalita signalu na dalnicich
+
+
+overlays_files = os.listdir("./overlays") # Budeme doufat, ze kazdy druh overlaye zacina tim jmenem, kterym jakoby je ve skutecnosti
+
+total_overlays = []
+overlays_names = []
+for file in overlays_files:
+    total_overlays.append(gpd.read_file(f"./overlays/{file}"))
+    overlays_names.append(file.split("_")[0]) 
+map_data_file = gpd.read_file("./overlays/VUSC_P.shp.geojson")
+
+
+# st.write(overlays_names) DEBUG
+# co ted - mam vic overlays, musim to nejak zakomponvoat nize, asi pomoci indexu i guess?
+
+
+operatori = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
     "O2 LTE": "O2 LTE - RSRP",
     "Vodafone LTE": "Vodafone LTE - RSRP"
@@ -26,7 +46,7 @@ signal_quality_ranges = {
 
 signal_quality_colors = {
     "dobrý": "green",
-    "střední": "blue",
+    "střední": "orange",
     "špatný": "red"
 }
 
@@ -40,30 +60,29 @@ def get_quality(value):
     else:
         return "špatný"
 
-if uploaded_file:
-    gdf = gpd.read_file(uploaded_file)
+if dalnice_celek is not None:
 
     operator = st.radio(
         "Vyberte operátora",
-        list(operator_map.keys())
+        list(operatori.keys())
     )
-    operator_col = operator_map[operator]
+    operator_col = operatori[operator]
 
     quality = st.selectbox(
         "Vyberte kvalitu signálu",
         quality_options
     )
 
-    # Přesnost zobrazení
     precision_options = [
-        "Větší přesnost (každý 10. bod)",
         "Menší přesnost (každý 20. bod)",
-        "Maximální přesnost (všechny body 1:1)"
+        "Větší přesnost (každý 10. bod)",
+        "Maximální přesnost (všechny body 1:1)",
+
     ]
     precision = st.radio(
         "Zvolte přesnost zobrazení",
         precision_options,
-        index=0  # Výchozí je větší přesnost (každý 10. bod)
+        index = 0 # Výchozí je větší přesnost (každý 10. bod)
     )
     if precision == "Větší přesnost (každý 10. bod)":
         reduction_factor = 10
@@ -72,30 +91,41 @@ if uploaded_file:
     else:
         reduction_factor = 1  # všechny body
 
-    filtered_gdf = gdf[~gdf[operator_col].isna()]
+    filtered_dalnice = dalnice_celek[~dalnice_celek[operator_col].isna()]
 
     if quality == "všechny":
-        filtered_gdf = filtered_gdf.copy()
-        filtered_gdf["signal_quality"] = filtered_gdf[operator_col].apply(get_quality)
-        st.write(f"Počet bodů s dostupným signálem {operator}: {len(filtered_gdf)}")
+        filtered_dalnice = filtered_dalnice.copy()
+        filtered_dalnice["signal_quality"] = filtered_dalnice[operator_col].apply(get_quality)
+        st.write(f"Počet bodů s dostupným signálem {operator}: {len(filtered_dalnice)}")
     else:
         min_val, max_val = signal_quality_ranges[quality]
-        filtered_gdf = filtered_gdf[(filtered_gdf[operator_col] >= min_val) & (filtered_gdf[operator_col] < max_val)]
-        st.write(f"Počet bodů s dostupným signálem {operator} a kvalitou '{quality}': {len(filtered_gdf)}")
+        filtered_dalnice = filtered_dalnice[(filtered_dalnice[operator_col] >= min_val) & (filtered_dalnice[operator_col] < max_val)]
+        st.write(f"Počet bodů s dostupným signálem {operator} a kvalitou '{quality}': {len(filtered_dalnice)}")
 
     # Redukce počtu bodů
-    reduced_gdf = filtered_gdf.iloc[::reduction_factor, :]
+    redukovane_body = filtered_dalnice.iloc[::reduction_factor, :]
 
-    st.write(f"Zobrazeno bodů po redukci: {len(reduced_gdf)}")
+    st.write(f"Zobrazeno bodů po redukci: {len(redukovane_body)}")
 
-    if reduced_gdf.empty:
+    if redukovane_body.empty:
         st.warning("Pro vybraného operátora a kvalitu signálu nejsou v datech žádné body.")
     else:
+        # Základní nastavení mapy
+        fig = folium.Figure(width=1200, height=1200)
+
         m = folium.Map(
-            location=[reduced_gdf.geometry.y.mean(), reduced_gdf.geometry.x.mean()],
-            zoom_start=10
-        )
-        for _, row in reduced_gdf.iterrows():
+            location=[50.0716968, 14.444761],
+            zoom_start=8,
+        ).add_to(fig)
+
+        folium.plugins.Fullscreen(
+            position="topright",
+            title="Fullscreen",
+            title_cancel="Zmenšit",
+            forced_separate_button=True,
+        ).add_to(m)
+
+        for _, row in redukovane_body.iterrows():
             signal = row[operator_col]
             time = row.get('time', 'N/A')
             if quality == "všechny":
@@ -122,4 +152,30 @@ if uploaded_file:
                 fill_opacity=0.7,
                 popup=f"{operator}: {signal} dBm<br>Čas: {time}"
             ).add_to(m)
+
+        # Přidání overlaye přes mapu (regiony, kraje, okresy, obce...)
+        for i in range(0, len(overlays_names)):
+            folium.GeoJson(
+                total_overlays[i],
+                name=overlays_names[i],
+                style_function=lambda feature: {
+                    'fillColor': 'lightblue',
+                    'color': 'black',
+                    'weight': 1,
+                    'fillOpacity': 0.5,
+                },
+                highlight_function=lambda feature: {
+                    'weight': 4,
+                    'color': 'red',
+                    'fillOpacity': 0.7
+                },
+                popup=folium.GeoJsonPopup(
+                    fields=[map_data_file.columns[1]],
+                    aliases=[""],
+                    localize=True
+                )
+            ).add_to(m)
+
+        folium.LayerControl().add_to(m)
+
         folium_static(m)
