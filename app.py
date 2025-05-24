@@ -6,9 +6,10 @@ import pandas as pd
 
 st.title("Interaktivní mapa signálu na dálnici")
 
-dalnice = gpd.read_file("./dalnice/pokryti-dalnic-mobilnim-signalem-d8_converted.geojson") 
+dalnice = gpd.read_file("./dalnice/pokryti-dalnic-mobilnim-signalem-d10_converted.geojson") 
 map_data_file = st.file_uploader("Nahrajte GeoJSON soubor", type=["geojson", "json"])
 
+# Chci aby to vzalo vsechny soubory v dalnice a z nich to vyzobrazilo tu mapu - cyklus? 
 
 operator_map = {
     "T-Mobile LTE": "T-Mobile LTE - RSRP",
@@ -24,7 +25,7 @@ signal_quality_ranges = {
 
 signal_quality_colors = {
     "dobrý": "green",
-    "střední": "blue",
+    "střední": "orange",
     "špatný": "red"
 }
 
@@ -55,14 +56,14 @@ if dalnice is not None:
 
     # Přesnost zobrazení
     precision_options = [
+        "Maximální přesnost (všechny body 1:1)",
         "Větší přesnost (každý 10. bod)",
-        "Menší přesnost (každý 20. bod)",
-        "Maximální přesnost (všechny body 1:1)"
+        "Menší přesnost (každý 20. bod)"
     ]
     precision = st.radio(
         "Zvolte přesnost zobrazení",
         precision_options,
-        index=0  # Výchozí je větší přesnost (každý 10. bod)
+        index = 0 # Výchozí je větší přesnost (každý 10. bod)
     )
     if precision == "Větší přesnost (každý 10. bod)":
         reduction_factor = 10
